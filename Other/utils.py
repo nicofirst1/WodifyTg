@@ -1,0 +1,281 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import ast
+import datetime
+import inspect
+import json
+
+import math
+
+import functools
+import traceback
+
+import requests
+from bs4 import BeautifulSoup
+
+developer_dicts = {"brandimax": 24978334, "odococo": 89675136}
+
+COMANDI_BOT_FATHER = """
+win - Ti dice la probabilità di vittoria che hai nell'ispezione dello gnomo
+dice - lancia un dado di numeroFacce un quantitativo di volte pari a numeroDadi
+consiglia - Invia una tabella con i numeri da cambiare
+roll - lancia un dado senza specificare nulla
+info - ottieni le informazioni riguardanti il tuo account
+convert - Converte test o numero verso una base arbitraria, si possono fornire valori di conversione per personalizzare il risultato
+help - mostra il messaggio di help
+start - avvia il bot
+resetboss - resetta i punteggi del Boss
+helplink - invia link del help completo
+pinboss - pinna il messaggio di attacco al boss
+utente - visualizza le info di un utente
+utenti - Visualizza gli utenti che utilizzano un determinato bot
+registra - Aggiorna i permessi di un utente
+attacchiboss - visializza le info sui punteggi del Boss
+resetboss - resetta i punteggi del Boss
+cercacraft - ricerca gli oggetti tramite punteggio craft
+permessi - stampa i permessi relativi al tuo account
+compra - ti aiuta a decidere quali scrigni comprare
+sendtoall - Invia un messaggio a tutti gli users
+json - invia il json dell'update
+rarita - invia le rarita che piu ti mancano nello zaino
+resetrarita - resetta le rarità salvate sinora
+removeuser - rimuove un user dal bot
+helpvideo - invia un video tutorial
+talenti - invia un pdf dei talenti
+cheoresonotra - ti dice che ore saranno tra un tot di tempo
+artefatti - invia la lista di artefatti
+svegliamadre - manda un messaggio ai membri del team madre
+deletefrombot - rimuove un user dal bot
+sveglia - invia un messaggio a uno o piu username per spronarli ad attaccare il boss
+top - mostra i top players in base a vari parametri
+migra - cambia username nel bot
+annulladefinitivo - toglie qualisasi tastiera personalizzata
+teams - visualizza i team
+mancanti - mostra tutti gli oggetti nel tuo zaino (non craftabili) che hanno una quantità inferiore a quella specificata
+diffschede - visualizza la differenza in pc tra due schede (team->dettaglio membri)
+timerset - setta il timer
+timerunset - elimina il timer precedentemente settato
+stanzavuota - invia i drop per le stanze vuote
+uganda - do u know de wey?
+unban - unbanna uno user dal bot tramite id (usa /banned per avere la lista dei bannati)
+banned - Ritorna una lista di tutti gli utenti bannati dal bot
+insulta - insulta un'utente a caso
+activity - mostra informazioni relative al gruppo fancazzisti
+classify - permette di guadagnare punti per accere alle info di activity
+punteggioact - visualizza il tuo punteggio legato alle activity
+topunteggio - visualizza i top punteggi 
+negozi - genera dei negozi per team
+chiblocca - controlla chi ha bloccato il bot
+stats - manda delle statistiche interessandi del tuo zaino
+"""
+
+
+def is_admin(id):
+    """Verifica se l'id dell'utente è di un admin o meno"""
+    admin = (89675136,  # Odococo
+             337053854,  # AlanBerti
+             24978334,  # brandimax
+             )
+    return id in admin
+
+def text_splitter_lines(text, splitter="\n", split_every=5):
+    """Divide un messaggio da mandare in piu parti, ritorna una lista di stringhe"""
+    text = [elem + splitter for elem in text.split(splitter) if elem]
+
+    text = [text[split_every * i:split_every * i + split_every] for i in range(0, math.ceil(len(text) / split_every))]
+
+    res=[]
+    for elem in text:
+        to_append="".join(elem)
+        if to_append: res.append(to_append)
+    return res
+
+
+def text_splitter_bytes(text,splitter="\n", split_every=4096):
+    """Divide un messaggio da mandare in piu parti
+    @:param text: messaggio da dividere
+    @:type: str
+    @:param splitter: lo splitter secondo cui dividere il messggio (default \n)
+    @:type: str
+    @:param split_every: bytes secondo cui splittare il text (default 4096)
+    @:type: int"""
+    #divide il testo
+    text = [elem+splitter for elem in text.split(splitter) if elem]
+
+    res=[]
+    to_append=""
+    for elem in text:
+        #se la lunghezza del testo in bytes del to_append + elem supera il parametrp
+        if len((to_append+elem).encode('utf-8'))>=split_every:
+            #appendi e resetta to_append
+            res.append(to_append)
+            to_append=""
+        # altrimenti aggiungi elem
+        to_append+=elem
+    #se la lunghezza del text è inferiore a split_every appendi al res
+    res.append(to_append)
+    return res
+
+
+def pretty_time_date(timedate_input, add_hour=1):
+    """Formatta la data inviata per poter essere printata
+        @:param timedate: la data
+        @:type: timedata
+        @:param add_hour: ore da aggiungere alla data (heroku è un ora indetro) default 1
+        @:type: int
+        @:return: ritorna due stringhe, ora e data"""
+
+    timedate = timedate_input + datetime.timedelta(hours=add_hour)
+    ora=str(timedate.time()).split(".")[0]
+    data=str(timedate.date().strftime('%d-%m-%Y'))
+
+    return ora, data
+
+
+
+
+def is_dev(id):
+    """Verifica se l'id del bot è quello del fancazzista supremo"""
+    return id == 333089594
+
+
+def is_fanca_admin(id):
+    """Verifica se l'id dell'utente è di un admin dei fancazzisti o meno"""
+    admin = (107839625,  # IMayonesX
+             241317532,  # Osho27
+             )
+
+    return id in admin
+
+#decoratore per inviare eccezioni direttamente ai developres
+
+def catch_exception(f):
+    """Invia le eccezzioni direttamente ai developers, il suo utilizzo è  @catch_exception posto sopra un metodo di una classe
+    che ha i primi due parametri bot e update"""
+    @functools.wraps(f)
+    def func(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            print(args, kwargs)
+            print(e)
+            tp=traceback.format_exc()
+            for value in developer_dicts.values():
+                args[2].bot.send_message(value, "<b>=====ERROR=====</b>",parse_mode="HTML")
+                args[2].bot.send_message(value, "TRACEBACK : "+tp)
+                args[2].bot.send_message(value, "With update:\n"+get_pretty_json(str(args[2])))
+
+    return func
+
+
+
+def is_tester(id):
+    tester = (107839625,  # IMayonesX
+              )
+    return is_admin(id) or id in tester
+
+
+def is_numeric(value, strict_int=False):
+    """Verifica se il valore passato è un numerico oppure una stringa che contiere un numerico"""
+    return isinstance(value, int) or (
+        not strict_int and isinstance(value, str)
+        and value.isnumeric())
+
+
+def reverse(obj):
+    """Ribalta l'oggetto passato"""
+    if isinstance(obj, str):
+        return obj[::-1]
+    elif isinstance(obj, int):
+        return int(str(obj)[::-1])
+    elif isinstance(obj, list):
+        obj.reverse()
+        return obj
+    else:
+        return obj
+
+
+def get_user(user):
+    if not user:
+        return None
+    fields = ["<strong>{}</strong>: <code>{}</code>".format(key, value)
+              for key, value in user.items() if key != "date"]
+    return "\n".join(fields)
+
+
+def get_user_id(update):
+    try:
+        return str(update._effective_user.id)
+    except AttributeError:
+        return str(update['message']['from'])
+    finally:
+        return 0
+
+
+def convert(value, from_base=None, to_base=None, values=None):
+    if not value:
+        return "Cosa vuoi convertire?"
+    elif isinstance(value, list):
+        return "".join([convert(val, from_base, to_base, values) for val in value])
+    if from_base and not to_base:
+        if from_base != 10:
+            value = convert(value, from_base, 10, values)
+        return chr(int(value))
+    elif not from_base and to_base:
+        value = str(value)
+        value = [ord(val) for val in value]
+        return convert(value, 10, to_base, values)
+    elif from_base and to_base:
+        if to_base != 10:
+            value = int(convert(value, from_base, 10, values))
+            if not values:
+                values = [str(index) for index in range(to_base)]
+            converted_values = []
+            while value > 0:
+                converted_values.append(values[value % to_base])
+                value //= to_base
+            return "".join(reverse(converted_values))
+        else:
+            value = str(value)
+            converted_values = [(from_base ** index) * int(val) for index, val in enumerate(reverse(value))]
+            return str(sum(converted_values))
+    else:
+        return "Specifica la base originale (conversione a stringa) oppure la base destinazione (conversione da stringa)"
+
+
+def now(string=True):
+    """Ritorna la data attuale nel formato yyyy-mm-dd h:m:s"""
+    now = datetime.datetime.now()
+    return now.strftime("%Y-%m-%d %H:%M:%S") if string else now
+
+
+def diff_date(date1, date2):
+    return abs(date2 - date1).days
+
+
+def get_proxy():
+    """Ottiene l'ip di un proxy di https://www.sslproxies.org/"""
+    proxies = get_content("https://www.sslproxies.org/").find_all('tr')
+    for proxy in proxies:
+        param = proxy.find_all('td')
+        if not param:
+            continue
+        yield {'https': "http://{ip}:{port}".format(ip=param[0].string, port=param[1].string)}
+
+
+def get_content(url, parse_json=False, proxies=None):
+    request = requests.get(url, allow_redirects=False, proxies=proxies)
+    if parse_json:
+        try:
+            return request.json()
+        except json.JSONDecodeError: return None
+
+    else:
+        return BeautifulSoup(request.content, "html.parser")
+
+
+def get_pretty_json(value):
+    if not isinstance(value, dict):
+        value = ast.literal_eval(value)
+    return json.dumps(value, indent=2)
